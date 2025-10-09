@@ -5,7 +5,8 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
   };
 
-  outputs = { self, nixpkgs }:
+  outputs =
+    { self, nixpkgs }:
     let
       system = "x86_64-linux";
       pkgs = import nixpkgs { inherit system; };
@@ -33,9 +34,13 @@
       devShells.${system}.default = pkgs.mkShell {
         name = "keybinder-dev";
         packages = with pkgs; [
-          python
+          python313
           ruff
-          pythonPackages.pyyaml
+          python313Packages.pydantic
+          # LSP For ths project
+          nil
+          nixd
+          pyright
         ];
         shellHook = ''
           echo "Entered Keybinder dev shell"
