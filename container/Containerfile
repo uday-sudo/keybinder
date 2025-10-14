@@ -1,0 +1,15 @@
+FROM git.homebox.com/uday-sudo/ubuntu-nix-24:0.2
+
+# Set work directory
+WORKDIR /app
+
+# Copy Nix flake definition files into the container
+COPY flake.nix /app
+COPY flake.lock /app
+
+# Preload dependencies and build the shell environment
+# This makes the container ready to "nix develop" right away.
+RUN nix develop .#test --command bash -c "echo 'Nix shell activated successfully'"
+
+# Default command opens an interactive Nix shell
+CMD ["nix", "develop", ".#test"]

@@ -1,0 +1,15 @@
+name: "Test"
+on: [push]
+jobs:
+  example:
+    runs-on: podman
+    container:
+      image: git.homebox.com/uday-sudo/keybinder/keybinder-test:0.1.0
+      options: --add-host=host.containers.internal:host-gateway
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          github-server-url: http://host.containers.internal:3000
+      - name: Ruff check
+        run: nix develop .#test --command ruff check .
