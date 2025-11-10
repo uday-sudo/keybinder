@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 import argparse
 import sys
+from parsers.tmux import TmuxParser
 
 MODULE_MAP = {
-    "tmux": 0,
+    "tmux": TmuxParser,
     "nvim": 0,
     "hyprland": 0,
 }
@@ -11,7 +12,11 @@ MODULE_MAP = {
 
 def list_modules():
     """Simulate listing available modules."""
-    pass
+    avaliable_modules = ""
+    for key, value in MODULE_MAP.items():
+        if value:
+            avaliable_modules += f"{key}, "
+    print(f"Avaliable modules: {avaliable_modules[:-2].strip()}")
 
 
 def main():
@@ -23,6 +28,12 @@ def main():
         "--out",
         type=str,
         help="Path to the output file where results will be written.",
+    )
+
+    parser.add_argument(
+        "--stdout",
+        action="store_true",
+        help="Write results to stdout.",
     )
 
     parser.add_argument(
@@ -46,8 +57,13 @@ def main():
 
     # Handle --module and --out
     if args.module:
-        output = f"Selected module: {args.module}"
-        print(output)
+        if MODULE_MAP.get(args.module):
+            parser = MODULE_MAP[args.module]
+            output = parser.convert_to_markdown()
+        else:
+            print(f"The module {args.module} is not implemented yet.")
+            parser.print_help()
+            sys.exit(0)
         if args.out:
             try:
                 with open(args.out, "w") as f:
@@ -55,10 +71,13 @@ def main():
                 print(f"Output written to {args.out}")
             except OSError as e:
                 print(f"Error writing to {args.out}: {e}")
-        else:
-            print("(No output file specified; printed to stdout.)")
+        if args.stdout:
+            print(output)
+        if not args.stdout and not args.out:
+            print("!!Output method not specified.")
     else:
         parser.print_help()
+        sys.exit(0)
 
 
 if __name__ == "__main__":
