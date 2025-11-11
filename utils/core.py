@@ -58,7 +58,7 @@ class BaseParser(ABC):
         raise NotImplementedError("This parser is not yet implemented")
 
     @classmethod
-    def filter_shortcuts(cls, Shortcuts: ShortcutList) -> ShortcutList:
+    def filter_shortcuts(cls, shortcuts: ShortcutList) -> ShortcutList:
         """Filter out only the required keymaps"""
         raise NotImplementedError("This parser is not yet implemented")
 
