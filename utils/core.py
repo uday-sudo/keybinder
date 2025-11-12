@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field, field_validator
 from abc import ABC, abstractmethod
-from typing import Optional, List
+from typing import Dict, Optional, List
 
 
 class Shortcut(BaseModel):
@@ -20,13 +20,28 @@ class Shortcut(BaseModel):
 
     def to_markdown_row(self) -> str:
         """Convert one shortcut to a Markdown table row."""
-        return f"| `{self.key_combination}` | {self.name} | {self.description or ''} | {self.mode or ''} |"
+        return f"| `{self.key_combination}` | {self.name} | {self.mode or ''} | {self.description or ''} |"
 
 
 class ShortcutList(BaseModel):
     """Wrapper model to ensure list-wide validation or post-processing."""
 
-    shortcuts: List[Shortcut]
+    shortcuts: List["Shortcut"]
+
+    def add(self, shortcut: "Shortcut") -> None:
+        """Append a new shortcut to the list."""
+        self.shortcuts.append(shortcut)
+
+    def remove(self, name: str) -> bool:
+        """
+        Remove a shortcut by its name.
+        Returns True if removed, False if not found.
+        """
+        for i, s in enumerate(self.shortcuts):
+            if s.name == name:
+                del self.shortcuts[i]
+                return True
+        return False
 
     def to_markdown(self, title: str = "Shortcuts") -> str:
         """Render the whole list to Markdown."""
@@ -35,7 +50,7 @@ class ShortcutList(BaseModel):
 
         header = "| Key | Action | Description | Mode |\n|-----|---------|-------------|------|"
         rows = "\n".join(shortcut.to_markdown_row() for shortcut in self.shortcuts)
-        return f"# {title}\n\n{header}\n{rows}\n"
+        return f"## {title}\n\n{header}\n{rows}\n"
 
 
 class BaseParser(ABC):
@@ -58,8 +73,27 @@ class BaseParser(ABC):
         raise NotImplementedError("This parser is not yet implemented")
 
     @classmethod
+    @abstractmethod
+    def keep_shortcut(cls, shortcut: Shortcut) -> bool:
+        """Whether or not the shortcut is to be kept"""
+        raise NotImplementedError("This parser is not yet implemented")
+
+    @classmethod
     def filter_shortcuts(cls, shortcuts: ShortcutList) -> ShortcutList:
         """Filter out only the required keymaps"""
+        filtered_shortcuts = ShortcutList(
+            shortcuts=[
+                shortcut
+                for shortcut in shortcuts.shortcuts
+                if cls.keep_shortcut(shortcut=shortcut)
+            ]
+        )
+        return filtered_shortcuts
+
+    @classmethod
+    @abstractmethod
+    def group_shortcuts(cls, shortcuts: ShortcutList) -> Dict[str, ShortcutList]:
+        """Group together shortcuts that have to be in together in a section"""
         raise NotImplementedError("This parser is not yet implemented")
 
     @classmethod
@@ -70,4 +104,9 @@ class BaseParser(ABC):
         raw_text = cls.get_application_output()
         shortcuts = cls.parse_output(raw_text)
         filtered_shortcuts = cls.filter_shortcuts(shortcuts)
-        return filtered_shortcuts.to_markdown(f"{cls.title} Shortcuts")
+        grouped_shortcuts = cls.group_shortcuts(filtered_shortcuts)
+        markdown = f"# {cls.title} Shortcuts\n"
+        for key, value in grouped_shortcuts.items():
+            markdown += f"\n{value.to_markdown(title=key)}\n"
+
+        return markdown

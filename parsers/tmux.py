@@ -1,40 +1,76 @@
-from annotated_types import SLOTS
+from collections import defaultdict
+from pydantic import ValidationError
 from utils.core import BaseParser, ShortcutList, Shortcut
-import shlex
 import subprocess
-import re
+from typing import Dict
 
 
-def process_tmux_line(line):
+def process_tmux_line(line: str) -> Shortcut:
     """
     Parse one 'tmux list-keys' line into (description, key_combination, mode).
-
     Example:
         "bind-key -r -T prefix S-Right refresh-client -R 10"
         → ("refresh-client -R 10", "S-Right", "prefix")
     """
-    # Split line safely (handles quoted args)
-    parts = shlex.split(line)
+    if not line.strip():
+        raise ValidationError
 
-    if not parts or parts[0] != "bind-key":
-        raise ValueError("Not a tmux bind-key line")
+    # Split by whitespace, preserving quoted strings
+    parts = line.split()
 
-    mode = None
+    mode = "root"  # default mode
     key_combination = ""
-    description_parts = []
+    description = ""
 
-    def strip_consec_spaces(text: str):
-        return re.sub(" +", " ", text).strip()
+    i = 0
+    while i < len(parts):
+        part = parts[i]
 
-    mode = strip_consec_spaces(line[0:27])
-    key_combination = strip_consec_spaces(line[28:51])
-    description = strip_consec_spaces(line[51:])
+        # Skip 'bind-key'
+        if part == "bind-key":
+            i += 1
+            continue
 
-    # Iterate through parts manually
+        # Handle flags
+        if part == "-r":  # repeatable flag
+            i += 1
+            continue
+
+        # Extract table/mode
+        if part == "-T":
+            i += 1
+            if i < len(parts):
+                mode = parts[i]
+            i += 1
+            continue
+
+        # Handle other single-letter flags
+        if part.startswith("-") and len(part) == 2:
+            i += 1
+            # Some flags take arguments
+            if part in ["-p", "-I", "-N", "-d", "-h", "-w", "-x", "-y", "-t"]:
+                # Skip the argument (might be quoted or a value)
+                if i < len(parts) and not parts[i].startswith("-"):
+                    i += 1
+            continue
+
+        # First non-flag, non-option token is the key combination
+        if not key_combination:
+            key_combination = part
+            i += 1
+            continue
+
+        # Everything else is the command/description
+        description = " ".join(parts[i:])
+        break
+
+    # Clean up key combination (remove backslash escapes)
+    # key_combination = key_combination.replace("\\", "")
+
     return Shortcut(
         key_combination=key_combination,
-        name=description,
-        description=description,
+        name=description.replace("|", r"\|"),
+        description=description.replace("|", r"\|"),
         mode=mode,
     )
 
@@ -53,11 +89,39 @@ class TmuxParser(BaseParser):
     @classmethod
     def parse_output(cls, raw_text: str) -> ShortcutList:
         """Convert raw text into a validated ShortcutList."""
-        lines = raw_text.split("\n")[:-1]
-        shortcuts = [process_tmux_line(line) for line in lines]
+        lines = raw_text.strip().split("\n")
+        shortcuts = []
+
+        for line in lines:
+            if line.strip():  # Skip empty lines
+                shortcut = process_tmux_line(line)
+                if shortcut:
+                    shortcuts.append(shortcut)
+
         return ShortcutList(shortcuts=shortcuts)
 
     @classmethod
-    def filter_shortcuts(cls, shortcuts: ShortcutList) -> ShortcutList:
-        """Filter out only the required keymaps"""
-        return shortcuts
+    def keep_shortcut(cls, shortcut: Shortcut) -> bool:
+        """Whether or not the shortcut is to be kept"""
+        if shortcut.mode == "root":
+            return True
+        return False
+
+    @classmethod
+    def group_shortcuts(cls, shortcuts: ShortcutList) -> Dict[str, ShortcutList]:
+        """Group together shortcuts that have to be in together in a section"""
+        groups = defaultdict(lambda: ShortcutList(shortcuts=[]))
+        for shortcut in shortcuts.shortcuts:
+            if shortcut.mode == "root":
+                if shortcut.description == "send-prefix":
+                    groups["Prefix"].add(shortcut)
+                elif any(
+                    [
+                        pattern in shortcut.key_combination.lower()
+                        for pattern in ("mouse", "wheel", "click")
+                    ]
+                ):
+                    groups["Mouse"].add(shortcut)
+                else:
+                    groups["Navigation"].add(shortcut)
+        return dict(groups)
