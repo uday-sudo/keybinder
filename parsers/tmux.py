@@ -3,9 +3,10 @@ from pydantic import ValidationError
 from utils.core import BaseParser, ShortcutList, Shortcut
 import subprocess
 from typing import Dict
+import json
 
 
-def process_tmux_line(line: str) -> Shortcut:
+def process_tmux_line(line: str, tmux_map: dict) -> Shortcut:
     """
     Parse one 'tmux list-keys' line into (description, key_combination, mode).
     Example:
@@ -64,12 +65,14 @@ def process_tmux_line(line: str) -> Shortcut:
         description = " ".join(parts[i:])
         break
 
-    # Clean up key combination (remove backslash escapes)
-    # key_combination = key_combination.replace("\\", "")
+    if key_combination.startswith("M-"):
+        key_combination = f"Alt+{key_combination[2:]}"
+    elif key_combination.startswith("C-"):
+        key_combination = f"Ctrl+{key_combination[2:]}"
 
     return Shortcut(
         key_combination=key_combination,
-        name=description.replace("|", r"\|"),
+        name=tmux_map.get(description, description.replace("|", r"\|")),
         description=description.replace("|", r"\|"),
         mode=mode,
     )
@@ -92,36 +95,87 @@ class TmuxParser(BaseParser):
         lines = raw_text.strip().split("\n")
         shortcuts = []
 
+        with open("parsers/data/tmux_map.json", "r") as tmux_map_json:
+            tmux_map = json.load(tmux_map_json)
+
         for line in lines:
             if line.strip():  # Skip empty lines
-                shortcut = process_tmux_line(line)
+                shortcut = process_tmux_line(line, tmux_map)
                 if shortcut:
                     shortcuts.append(shortcut)
 
         return ShortcutList(shortcuts=shortcuts)
 
     @classmethod
-    def keep_shortcut(cls, shortcut: Shortcut) -> bool:
-        """Whether or not the shortcut is to be kept"""
-        if shortcut.mode == "root":
-            return True
-        return False
+    def keep_shortcut(cls, shortcut: Shortcut):
+        if not shortcut.key_combination or not shortcut.name:
+            return False
+        desc = (shortcut.description or "").lower()
+        key = shortcut.key_combination.lower()
+        name = shortcut.name.lower()
+        if desc in ["", "no action"]:
+            return False
+        if any(x in key for x in ["drag", "wheel", "border"]):
+            return False
+        if any(
+            x in desc
+            for x in ["cursor-left", "cursor-right", "cursor-up", "cursor-down"]
+        ):
+            return False
+        if "select " in name or "copy-pipe" in desc:
+            return False
+        if any([x in name for x in ["scroll", "copy", "context menu"]]):
+            return False
+        return True
 
     @classmethod
     def group_shortcuts(cls, shortcuts: ShortcutList) -> Dict[str, ShortcutList]:
-        """Group together shortcuts that have to be in together in a section"""
         groups = defaultdict(lambda: ShortcutList(shortcuts=[]))
         for shortcut in shortcuts.shortcuts:
-            if shortcut.mode == "root":
-                if shortcut.description == "send-prefix":
-                    groups["Prefix"].add(shortcut)
-                elif any(
-                    [
-                        pattern in shortcut.key_combination.lower()
-                        for pattern in ("mouse", "wheel", "click")
-                    ]
-                ):
-                    groups["Mouse"].add(shortcut)
-                else:
-                    groups["Navigation"].add(shortcut)
-        return dict(groups)
+            key = shortcut.key_combination.lower()
+            desc = (shortcut.description or "").lower()
+            mode = (shortcut.mode or "").lower()
+
+            if any(
+                x in desc
+                for x in [
+                    "window",
+                    "session",
+                    "rename",
+                    "new-session",
+                    "new-window",
+                    "switch-client",
+                ]
+            ):
+                groups["Session & Window Management"].add(shortcut)
+            elif any(x in desc for x in ["pane", "split", "resize", "swap", "zoom"]):
+                groups["Pane Management"].add(shortcut)
+            elif any(
+                x in desc
+                for x in [
+                    "select",
+                    "move",
+                    "next",
+                    "previous",
+                    "last-window",
+                    "last-pane",
+                ]
+            ):
+                groups["Navigation"].add(shortcut)
+            elif mode in ["copy-mode", "copy-mode-vi"] or any(
+                x in desc for x in ["search", "copy", "paste", "scroll", "selection"]
+            ):
+                groups["Copy & Scroll Mode"].add(shortcut)
+            elif "mouse" in key:
+                groups["Mouse Actions"].add(shortcut)
+            elif any(
+                x in desc
+                for x in ["layout", "even-horizontal", "even-vertical", "tiled"]
+            ):
+                groups["Layout & Zoom"].add(shortcut)
+            elif mode == "root":
+                groups["Global (Root Mode)"].add(shortcut)
+            else:
+                groups["Utility & Misc"].add(shortcut)
+
+        return groups

@@ -20,7 +20,7 @@ class Shortcut(BaseModel):
 
     def to_markdown_row(self) -> str:
         """Convert one shortcut to a Markdown table row."""
-        return f"| `{self.key_combination}` | {self.name} | {self.mode or ''} | {self.description or ''} |"
+        return f"| {self.mode or ''} | `` {self.key_combination} `` | {self.name} |"
 
 
 class ShortcutList(BaseModel):
@@ -48,7 +48,7 @@ class ShortcutList(BaseModel):
         if not self.shortcuts:
             return f"# {title}\n\n_No shortcuts found._"
 
-        header = "| Key | Action | Description | Mode |\n|-----|---------|-------------|------|"
+        header = "| Mode | Key | Name | Description |\n|-----|---------|-------------|------|"
         rows = "\n".join(shortcut.to_markdown_row() for shortcut in self.shortcuts)
         return f"## {title}\n\n{header}\n{rows}\n"
 
